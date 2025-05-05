@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@+id/menu"
-            app:showAsAction="always"
-            android:title="меню"/>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-            android:id="@+id/music"
-            android:title="Музыка"
-            app:showAsAction="always" />
-
+            android:id="@+id/start_music"
+            android:title="Музыканы бастау" />
+    <item
+            android:id="@+id/stop_music"
+            android:title="Музыканы тоқтату" />
 </menu>
