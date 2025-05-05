@@ -1,73 +1,92 @@
 package com.sozdle.sozdle.services
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.os.IBinder
 import android.util.Log
-import okhttp3.*
-import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
-import java.io.InputStream
-import java.net.NetworkInterface
-import java.util.*
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
+import com.sozdle.sozdle.R
 
-class CsvDownloadService : Service() {
+class MusicService : Service() {
 
-    private val client = OkHttpClient()
-    private val scheduler = Executors.newSingleThreadScheduledExecutor()
+    private var mediaPlayer: MediaPlayer? = null
+    private var originalVolume: Int? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val wordLength = intent?.getIntExtra("wordLength", 5) ?: 5
+        // Stop any existing playback
+        stopMusic()
 
-        scheduler.scheduleWithFixedDelay({
-            val ip = "192.168.90.193"
+        // Get AudioManager to control system volume
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-            val url = "http://$ip:8080/api/words/csv/words_${wordLength}_letters.csv"
-            downloadCsv(url, wordLength)
+        // Request audio focus
+        val result = audioManager.requestAudioFocus(
+            AudioManager.OnAudioFocusChangeListener { focusChange ->
+                when (focusChange) {
+                    AudioManager.AUDIOFOCUS_LOSS -> stopMusic()
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> mediaPlayer?.pause()
+                    AudioManager.AUDIOFOCUS_GAIN -> mediaPlayer?.start()
+                }
+            },
+            AudioManager.STREAM_MUSIC,
+            AudioManager.AUDIOFOCUS_GAIN
+        )
 
-        }, 0, 15, TimeUnit.SECONDS)
+        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            Log.w("MusicService", "Audio focus not granted")
+            return START_NOT_STICKY
+        }
+
+        // Save current volume and set to maximum
+        originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVolume, 0)
+        Log.d("MusicService", "Set media volume to max: $maxVolume")
+
+        // Initialize and start MediaPlayer with the music file
+        try {
+            mediaPlayer = MediaPlayer.create(this, R.raw.game_music)
+            mediaPlayer?.apply {
+                setAudioStreamType(AudioManager.STREAM_MUSIC)
+                isLooping = true // Loop the music
+                setVolume(1.0f, 1.0f) // Set maximum MediaPlayer volume
+                start()
+            }
+            Log.d("MusicService", "Music started with max system and player volume")
+        } catch (e: Exception) {
+            Log.e("MusicService", "Error starting music", e)
+        }
 
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        scheduler.shutdownNow()
+        stopMusic()
+        Log.d("MusicService", "MusicService destroyed")
+    }
+
+    private fun stopMusic() {
+        // Abandon audio focus
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.abandonAudioFocus(null)
+
+        // Restore original volume if available
+        originalVolume?.let { volume ->
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volume, 0)
+            Log.d("MusicService", "Restored media volume to: $volume")
+        }
+
+        mediaPlayer?.let {
+            if (it.isPlaying) {
+                it.stop()
+            }
+            it.release()
+        }
+        mediaPlayer = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun downloadCsv(url: String, wordLength: Int) {
-        val request = Request.Builder().url(url).build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e("CsvService", "Download failed", e)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                if (response.isSuccessful && response.body != null) {
-                    val inputStream: InputStream = response.body!!.byteStream()
-                    val file = File(filesDir, "words_${wordLength}_letters.csv")
-                    val fos = FileOutputStream(file)
-
-                    val buffer = ByteArray(4096)
-                    var bytesRead: Int
-                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                        fos.write(buffer, 0, bytesRead)
-                    }
-
-                    fos.close()
-                    inputStream.close()
-
-                    Log.d("CsvService", "CSV saved to ${file.absolutePath}")
-                } else {
-                    Log.e("CsvService", "Response not successful: ${response.code}")
-                }
-            }
-        })
-    }
 }
